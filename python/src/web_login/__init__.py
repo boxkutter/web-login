@@ -27,7 +27,7 @@ from web_login.ports import (
     StaticPolicy,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "AuthError", "Cipher", "ErrorSet", "Conflict", "DbPolicy", "FernetCipher", "Forbidden", "Invalid", "LoginConfig", "LoginKit", "Mailer",
     "MemoryLimiter", "Models", "NotFound", "NullMailer", "Policy", "ProviderError", "RateLimited", "RateLimiter",
