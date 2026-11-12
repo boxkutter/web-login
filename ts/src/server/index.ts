@@ -26,6 +26,13 @@ export interface SignInRouteOptions {
   pick?: string[];
 }
 
+export interface ProxyOptions {
+  /** Which paths (below the prefix, without a leading slash) may be reached. Default: `me` and anything under `me/`. */
+  allow?: (path: string) => boolean;
+  /** The API's path prefix (default `/v1`). */
+  upstreamPrefix?: string;
+}
+
 export function sameOrigin(req: NextRequest): boolean {
   const origin = req.headers.get("origin");
   if (!origin) return false;
@@ -136,7 +143,49 @@ export function createLoginServer(config: ServerConfig) {
     }
   }
 
-  return { config: { ...config, apiUrl }, sameOrigin, setSession, setPendingMfa, clearSession, signInRoute, mfaRoute, publicPost, sessionToken, apiGet };
+  /** Start a single sign-on login: ask the API for the provider's address and send the browser there. */
+  async function oidcStartRoute(req: NextRequest, key: string, failureUrl = "/login?error=provider"): Promise<Response> {
+    if (!/^[a-z0-9][a-z0-9-]{1,38}$/.test(key)) return new Response(null, { status: 404 });
+    const r = await fetch(`${apiUrl}/v1/auth/oidc/${key}/start`, { cache: "no-store" }).catch(() => null);
+    if (!r || !r.ok) return NextResponse.redirect(new URL(failureUrl, req.url));
+    const { authorization_url } = await r.json();
+    return NextResponse.redirect(authorization_url);
+  }
+
+  /**
+   * The browser's way to the signed-in calls of the sign-in API (`me/...`): /api/bff/<path> becomes <API><upstreamPrefix>/<path>
+   * with the session token added from the cookie. Only paths `allow` accepts are reachable (default: `me/` and nothing under
+   * `auth/`), and state-changing calls must come from this site. JSON in, JSON out.
+   */
+  async function proxyRoute(req: NextRequest, path: string[], opts: ProxyOptions = {}): Promise<Response> {
+    if (!SAFE_METHODS.has(req.method) && !sameOrigin(req)) return NextResponse.json({ detail: "Cross-site request refused." }, { status: 403 });
+    // Segments arrive decoded: refuse anything that could change the path once the URL is normalised.
+    if (path.length === 0 || path.some((p) => p === "" || p === ".." || p === "." || /[\/\\?#]/.test(p))) return new Response(null, { status: 400 });
+    const joined = path.join("/");
+    const allow = opts.allow ?? ((p: string) => p === "me" || p.startsWith("me/"));
+    const prefix = opts.upstreamPrefix ?? "/v1";
+    const target = new URL(`${apiUrl}${prefix}/${joined}`);
+    if (!allow(joined) || !target.pathname.startsWith(`${prefix}/`) || target.pathname.startsWith(`${prefix}/auth/`)) return new Response(null, { status: 404 });
+    const token = req.cookies.get(config.sessionCookie)?.value;
+    if (!token) return NextResponse.json({ detail: "Sign in to continue." }, { status: 401 });
+    const hasBody = !SAFE_METHODS.has(req.method);
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+    const ua = req.headers.get("user-agent");
+    if (ua) headers["user-agent"] = ua;
+    const fwd = req.headers.get("x-forwarded-for");
+    if (fwd) headers["x-forwarded-for"] = fwd;
+    if (hasBody) headers["content-type"] = "application/json";
+    target.search = req.nextUrl.search;
+    let r: Response;
+    try {
+      r = await fetch(target, { method: req.method, headers, body: hasBody ? await req.text() : undefined, cache: "no-store" });
+    } catch {
+      return NextResponse.json({ detail: "The service is not reachable. Try again shortly." }, { status: 503 });
+    }
+    return new NextResponse(r.status === 204 ? null : r.body, { status: r.status, headers: { "content-type": r.headers.get("content-type") ?? "application/json", "cache-control": "no-store" } });
+  }
+
+  return { config: { ...config, apiUrl }, sameOrigin, setSession, setPendingMfa, clearSession, signInRoute, mfaRoute, publicPost, oidcStartRoute, proxyRoute, sessionToken, apiGet };
 }
 
 export type LoginServer = ReturnType<typeof createLoginServer>;

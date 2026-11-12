@@ -88,3 +88,41 @@ describe("publicPost", () => {
     expect(await (await login.publicPost(req({ email: "a@b.test" }), "/v1/auth/password-reset", ["email"])).json()).toEqual({ ok: true, detail: "If that address has an account, a link is on its way." });
   });
 });
+
+describe("proxyRoute", () => {
+  const get = (path: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}, cookies = "app_session=TOK") =>
+    new NextRequest(`http://app.test/api/bff/${path}`, { method: init.method ?? "GET", headers: { host: "app.test", origin: "http://app.test", cookie: cookies, ...(init.headers ?? {}) }, body: init.body });
+
+  it("adds the token from the cookie, keeps to the allowed paths, and never reaches the sign-in routes", async () => {
+    const f = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ email: "a@b.test" }), { status: 200, headers: { "content-type": "application/json" } }));
+    const ok = await login.proxyRoute(get("me"), ["me"]);
+    expect(ok.status).toBe(200);
+    const [url, init] = f.mock.calls[0]!;
+    expect(String(url)).toBe("http://api.test/v1/me");
+    expect(((init as RequestInit).headers as Record<string, string>).Authorization).toBe("Bearer TOK");
+    for (const p of [["auth", "login"], ["platform", "settings"]]) expect((await login.proxyRoute(get(p.join("/")), p)).status).toBe(404);
+    for (const p of [["me", ".."], ["me", "a%2Fb"], ["me", ""], []]) expect((await login.proxyRoute(get("x"), p)).status).toBe(400);
+    expect((await login.proxyRoute(get("me"), ["me"], )).status).toBe(200);
+    expect((await login.proxyRoute(get("me", {}, ""), ["me"])).status).toBe(401);
+  });
+
+  it("refuses a state-changing call from another site and passes a body through", async () => {
+    const f = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    expect((await login.proxyRoute(get("me/password", { method: "POST", headers: { origin: "http://evil.test" }, body: "{}" }), ["me", "password"])).status).toBe(403);
+    const res = await login.proxyRoute(get("me/password", { method: "POST", headers: { "content-type": "application/json" }, body: '{"a":1}' }), ["me", "password"]);
+    expect(res.status).toBe(204);
+    expect((f.mock.calls[0]![1] as RequestInit).body).toBe('{"a":1}');
+    expect((await login.proxyRoute(get("things", {}), ["things"], { allow: (p) => p === "things" })).status).toBe(204);
+  });
+});
+
+describe("oidcStartRoute", () => {
+  it("sends the browser to the provider, or back to the sign-in page when the provider cannot be reached", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ authorization_url: "https://idp.test/authorize?x=1" }), { status: 200 }));
+    const r = await login.oidcStartRoute(new NextRequest("http://app.test/api/session/oidc/acme/start"), "acme");
+    expect(r.headers.get("location")).toBe("https://idp.test/authorize?x=1");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 404 }));
+    expect((await login.oidcStartRoute(new NextRequest("http://app.test/api/session/oidc/acme/start"), "acme")).headers.get("location")).toBe("http://app.test/login?error=provider");
+    expect((await login.oidcStartRoute(new NextRequest("http://app.test/x"), "../evil")).status).toBe(404);
+  });
+});

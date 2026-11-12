@@ -1,6 +1,6 @@
 {
   "name": "@boxkutter/web-login",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Sign-in screens for React and Next.js apps that use the web-login server: sign in, second step, sign up, forgot and reset password, email confirmation, authenticator setup, and the single sign-on callback. Plus the Next.js server helpers that keep the session token in an HttpOnly cookie.",
   "license": "MIT",
   "private": false,
