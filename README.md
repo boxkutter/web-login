@@ -16,7 +16,7 @@ identity provider without changing the app.
 | Part | What | Status |
 |---|---|---|
 | [`python/`](python) | `boxkutter-web-login`: models, service, OIDC client, FastAPI router | working, tested |
-| `ts/` | `@boxkutter/web-login`: React sign-in, second-step, reset and security screens for Next.js / React apps | planned |
+| [`ts/`](ts) | `@boxkutter/web-login`: the sign-in screens for React and Next.js, and the Next.js route helpers that keep the session token in an HttpOnly cookie | working, tested |
 
 ## Quick start (Python / FastAPI)
 
@@ -84,6 +84,32 @@ until the administrator has signed in through a working connector, so nobody can
 
 Run your own Zitadel (or any provider) and point the connector at it. This library never needs one.
 
+## Screens for React and Next.js
+
+`@boxkutter/web-login` has three entry points: `.` (types, `safeNext`, a small fetch client), `./react` (the screens) and
+`./server` (Next.js route helpers). The browser never holds the session token: your Next.js route handlers set it as an
+HttpOnly cookie and the screens only learn where to go next.
+
+```ts
+// lib/login.ts (server)
+import { createLoginServer } from "@boxkutter/web-login/server";
+export const login = createLoginServer({ apiUrl: process.env.API_URL!, sessionCookie: "app_session", mfaCookie: "app_mfa" });
+
+// app/api/session/login/route.ts
+export const POST = (req: NextRequest) => login.signInRoute(req, "/v1/auth/login", { pick: ["email", "password"] });
+// app/api/session/mfa/route.ts
+export const POST = (req: NextRequest) => login.mfaRoute(req);
+
+// app/login/page.tsx
+import { LoginForm } from "@boxkutter/web-login/react";
+<LoginForm {...options} next={safeNext(searchParams.next)} />
+```
+
+Screens: `LoginForm` (password, second step, recovery code, single sign-on buttons), `RegisterForm`, `ForgotForm`, `ResetForm`,
+`VerifyEmail`, `ResendVerification`, `OidcCallback`, `SecurityPanel` (authenticator set-up, recovery codes, change password).
+Wrap them in `<LoginProvider>` to change the API paths, where people are sent, your router's `Link`, or the class names;
+`@boxkutter/web-login/styles.css` is an optional starter stylesheet.
+
 ## Security notes
 
 - Passwords: Argon2id; a missing account still costs a hash (no timing leak); length-based policy (NIST 800-63B).
@@ -101,6 +127,9 @@ Run your own Zitadel (or any provider) and point the connector at it. This libra
 cd python
 uv venv && uv pip install -e ".[dev]"
 .venv/bin/ruff check . && .venv/bin/pytest
+
+cd ../ts
+npm install && npm run typecheck && npm test && npm run build
 ```
 
 ## Licence

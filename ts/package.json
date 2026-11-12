@@ -1,0 +1,50 @@
+{
+  "name": "@boxkutter/web-login",
+  "version": "0.1.0",
+  "description": "Sign-in screens for React and Next.js apps that use the web-login server: sign in, second step, sign up, forgot and reset password, email confirmation, authenticator setup, and the single sign-on callback. Plus the Next.js server helpers that keep the session token in an HttpOnly cookie.",
+  "license": "MIT",
+  "private": false,
+  "type": "module",
+  "sideEffects": ["*.css"],
+  "files": ["dist", "README.md"],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs" },
+    "./react": { "types": "./dist/react.d.ts", "import": "./dist/react.js", "require": "./dist/react.cjs" },
+    "./server": { "types": "./dist/server.d.ts", "import": "./dist/server.js", "require": "./dist/server.cjs" },
+    "./styles.css": "./dist/styles.css"
+  },
+  "scripts": {
+    "build": "tsup && cp src/styles.css dist/styles.css",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepare": "npm run build"
+  },
+  "peerDependencies": {
+    "next": ">=14",
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "next": { "optional": true },
+    "react": { "optional": true },
+    "react-dom": { "optional": true }
+  },
+  "devDependencies": {
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
+    "@types/node": "22.10.2",
+    "@types/react": "19.1.17",
+    "@types/react-dom": "19.1.11",
+    "jsdom": "26.1.0",
+    "next": "15.5.28",
+    "react": "19.1.10",
+    "react-dom": "19.1.10",
+    "tsup": "8.5.0",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  },
+  "repository": { "type": "git", "url": "git+https://github.com/boxkutter/web-login.git", "directory": "ts" }
+}

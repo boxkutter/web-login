@@ -18,3 +18,6 @@ Rules that are easy to miss:
 - No secrets, keys or real addresses in tests or docs; use `example.test`.
 
 Checks: `cd python && .venv/bin/ruff check . && .venv/bin/pytest`.
+
+TypeScript (`ts/`): the screens must stay framework-light (React only; Next.js only in `src/server`), keep the session token out of
+the browser (HttpOnly cookie set by the server helpers), and never name an app. Checks: `cd ts && npm run typecheck && npm test && npm run build`.

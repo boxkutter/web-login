@@ -1,0 +1,20 @@
+/* Optional starter styles for the screens. Everything reads CSS variables with fallbacks, so a few overrides re-colour it;
+   or skip this file and style the class names yourself (they can be changed through <LoginProvider classes={...}>). */
+.stack { display: flex; flex-direction: column; gap: 0.9rem; }
+.row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.stack label { display: flex; flex-direction: column; gap: 0.25rem; font-weight: 600; }
+.stack input { font: inherit; padding: 0.55rem 0.7rem; border: 1px solid var(--wl-border, #c9ced6); border-radius: var(--wl-radius, 6px); background: var(--wl-bg, #fff); color: inherit; }
+.stack input:focus-visible, .stack button:focus-visible, a.button:focus-visible { outline: 2px solid var(--wl-accent, #0f766e); outline-offset: 2px; }
+.hint { font-weight: 400; font-size: 0.85rem; color: var(--wl-muted, #5b6573); }
+button, a.button { font: inherit; padding: 0.55rem 0.9rem; border-radius: var(--wl-radius, 6px); border: 1px solid var(--wl-border, #c9ced6); background: var(--wl-bg, #fff); color: inherit; cursor: pointer; text-align: center; text-decoration: none; }
+button.primary { background: var(--wl-accent, #0f766e); border-color: var(--wl-accent, #0f766e); color: #fff; }
+button.danger { border-color: var(--wl-danger, #b42318); color: var(--wl-danger, #b42318); }
+button:disabled { opacity: 0.6; cursor: progress; }
+.divider { text-align: center; color: var(--wl-muted, #5b6573); margin: 0.5rem 0; }
+.card { border: 1px solid var(--wl-border, #c9ced6); border-radius: var(--wl-radius, 6px); padding: 1.25rem; margin-bottom: 1rem; }
+.badge { font-size: 0.75rem; padding: 0.1rem 0.5rem; border-radius: 999px; border: 1px solid var(--wl-border, #c9ced6); }
+.badge--on { background: #e6f4ea; color: #14532d; border-color: #b7dfc3; }
+.codes { columns: 2; font-family: ui-monospace, monospace; }
+.alert { padding: 0.7rem 0.9rem; border-radius: var(--wl-radius, 6px); margin-bottom: 0.9rem; }
+.alert--error { background: #fdecea; color: #7a1c14; border: 1px solid #f3b7b0; }
+.alert--success { background: #e6f4ea; color: #14532d; border: 1px solid #b7dfc3; }
