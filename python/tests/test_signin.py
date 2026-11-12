@@ -271,3 +271,15 @@ def test_an_app_can_supply_its_own_error_classes():
     with s.db() as db:
         with pytest.raises(MyUnauthorized):
             s.kit.accounts().sign_in(db, email="first@example.test", password="wrong wrong wrong", ip=None, user_agent=None)
+
+
+def test_an_app_with_its_own_me_route_can_leave_the_librarys_out():
+    from fastapi import APIRouter
+
+    from web_login.api import create_router
+
+    s = Stack()
+    paths = {r.path for r in create_router(s.kit, s.get_session, s.auth, include_me=False).routes}
+    assert "/v1/me" not in paths and "/v1/me/password" in paths and "/v1/auth/login" in paths
+    assert "/v1/me" in {r.path for r in create_router(s.kit, s.get_session, s.auth).routes}
+    assert APIRouter

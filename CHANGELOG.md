@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.0
+- `include_me=False` on both routers, for apps with their own `GET /me`.
+
 ## 0.3.0
 - `web_login.api_async`: the same routes for apps on SQLAlchemy's async engine (`AsyncAuthDeps`, `create_async_router`, `create_async_admin_router`). Every test scenario runs through both routers.
 - `SmtpMailer`: a ready-made plain-text mailer for the four sign-in emails.

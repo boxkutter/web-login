@@ -178,7 +178,7 @@ def user_out(user, state: str) -> dict:
 
 
 def create_router(
-    kit: LoginKit, get_session: Callable, auth: AuthDeps, *, prefix: str = "/v1", include_register: bool = True,
+    kit: LoginKit, get_session: Callable, auth: AuthDeps, *, prefix: str = "/v1", include_register: bool = True, include_me: bool = True,
     user_extra: Callable[[Session, object], dict] | None = None, can_register: Callable | None = None,
 ) -> APIRouter:
     """The sign-in routes. ``include_register=False`` lets an app write its own sign-up (to create a workspace or accept an
@@ -234,12 +234,13 @@ def create_router(
         accounts.record_event(db, "logout", user_id=a.user.id, ip=None)
         db.commit()
 
-    @router.get("/me")
-    def me(a: Auth = Depends(auth.enrolling_auth), db: Session = Depends(get_session)):
-        out = user_out(a.user, a.session.state)
-        if user_extra:
-            out.update(user_extra(db, a.user))
-        return out
+    if include_me:
+        @router.get("/me")
+        def me(a: Auth = Depends(auth.enrolling_auth), db: Session = Depends(get_session)):
+            out = user_out(a.user, a.session.state)
+            if user_extra:
+                out.update(user_extra(db, a.user))
+            return out
 
     @router.post("/me/password", status_code=204)
     def change_password(body: PasswordIn, request: Request, a: Auth = Depends(auth.current_auth), db: Session = Depends(get_session)):

@@ -106,7 +106,7 @@ class AsyncAuthDeps:
 
 
 def create_async_router(
-    kit: LoginKit, get_session: Callable, auth: AsyncAuthDeps, *, prefix: str = "/v1", include_register: bool = True,
+    kit: LoginKit, get_session: Callable, auth: AsyncAuthDeps, *, prefix: str = "/v1", include_register: bool = True, include_me: bool = True,
     user_extra: Callable | None = None, can_register: Callable | None = None,
 ) -> APIRouter:
     """The sign-in routes (see ``web_login.api.create_router``). ``user_extra`` and ``can_register`` are called as
@@ -167,12 +167,13 @@ def create_async_router(
         await db.run_sync(work)
         await db.commit()
 
-    @router.get("/me")
-    async def me(a: Auth = Depends(auth.enrolling_auth), db: AsyncSession = Depends(get_session)):
-        out = user_out(a.user, a.session.state)
-        if user_extra:
-            out.update(await _run(db, user_extra, a.user))
-        return out
+    if include_me:
+        @router.get("/me")
+        async def me(a: Auth = Depends(auth.enrolling_auth), db: AsyncSession = Depends(get_session)):
+            out = user_out(a.user, a.session.state)
+            if user_extra:
+                out.update(await _run(db, user_extra, a.user))
+            return out
 
     @router.post("/me/password", status_code=204)
     async def change_password(body: PasswordIn, request: Request, a: Auth = Depends(auth.current_auth), db: AsyncSession = Depends(get_session)):

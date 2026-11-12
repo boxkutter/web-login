@@ -1,6 +1,6 @@
 [project]
 name = "boxkutter-web-login"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local sign-in for web services: password, authenticator app, recovery codes, sessions, email tokens, and optional OpenID Connect. Framework-light core with a FastAPI router."
 readme = "README.md"
 license = { text = "MIT" }
