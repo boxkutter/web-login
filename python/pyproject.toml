@@ -1,6 +1,6 @@
 [project]
 name = "boxkutter-web-login"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local sign-in for web services: password, authenticator app, recovery codes, sessions, email tokens, and optional OpenID Connect. Framework-light core with a FastAPI router."
 readme = "README.md"
 license = { text = "MIT" }
@@ -16,7 +16,8 @@ dependencies = [
 [project.optional-dependencies]
 fastapi = ["fastapi>=0.110"]
 redis = ["redis>=5"]
-dev = ["pytest>=8", "ruff>=0.5", "fastapi>=0.110", "redis>=5", "fakeredis>=2.20"]
+async = ["sqlalchemy[asyncio]>=2.0", "fastapi>=0.110"]
+dev = ["pytest>=8", "ruff>=0.5", "fastapi>=0.110", "redis>=5", "fakeredis>=2.20", "sqlalchemy[asyncio]>=2.0", "aiosqlite>=0.20"]
 
 [build-system]
 requires = ["hatchling"]

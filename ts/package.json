@@ -20,7 +20,7 @@
     "build": "tsup && cp src/styles.css dist/styles.css",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "prepare": "npm run build"
+    "prepack": "npm run build"
   },
   "peerDependencies": {
     "next": ">=14",
