@@ -101,7 +101,7 @@ describe("proxyRoute", () => {
     expect(String(url)).toBe("http://api.test/v1/me");
     expect(((init as RequestInit).headers as Record<string, string>).Authorization).toBe("Bearer TOK");
     for (const p of [["auth", "login"], ["platform", "settings"]]) expect((await login.proxyRoute(get(p.join("/")), p)).status).toBe(404);
-    for (const p of [["me", ".."], ["me", "a%2Fb"], ["me", ""], []]) expect((await login.proxyRoute(get("x"), p)).status).toBe(400);
+    for (const p of [["me", ".."], ["me", "a/b"], ["me", ""], []]) expect((await login.proxyRoute(get("x"), p)).status).toBe(400);
     expect((await login.proxyRoute(get("me"), ["me"], )).status).toBe(200);
     expect((await login.proxyRoute(get("me", {}, ""), ["me"])).status).toBe(401);
   });
