@@ -30,17 +30,18 @@ class Models:
     EmailToken: type
     AuthProvider: type
     OidcLoginState: type
-    LoginSettings: type
+    LoginSettings: type | None
     tables: dict
 
 
-def build_models(Base, *, prefix: str = "", user_bases: tuple = (), names: dict | None = None) -> Models:
+def build_models(Base, *, prefix: str = "", user_bases: tuple = (), names: dict | None = None, with_settings: bool = True) -> Models:
     """Create the tables on ``Base``.
 
     ``prefix`` is put before every table name (to share a database with other tables). ``names`` renames individual tables
     (keys: users, user_sessions, totp_factors, recovery_codes, user_identities, security_events, email_tokens,
     auth_providers, oidc_login_states, login_settings). ``user_bases`` are mixins added to the user table, for columns the
-    app needs of its own (it must give them defaults or allow NULL).
+    app needs of its own (it must give them defaults or allow NULL). ``with_settings=False`` leaves out the ``login_settings``
+    table for apps that keep the operator's rules in a table of their own (they supply their own ``Policy``).
     """
     n = {k: f"{prefix}{k}" for k in (
         "users", "user_sessions", "totp_factors", "recovery_codes", "user_identities", "security_events", "email_tokens",
@@ -169,15 +170,18 @@ def build_models(Base, *, prefix: str = "", user_bases: tuple = (), names: dict 
         created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
         expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
-    class LoginSettings(Base):
-        """One row of operator-set rules, for apps without a settings table of their own (see ``DbPolicy``)."""
+    LoginSettings = None
+    if with_settings:
 
-        __tablename__ = n["login_settings"]
-        id: Mapped[int] = mapped_column(primary_key=True, default=1)
-        local_login_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-        registration_open: Mapped[bool] = mapped_column(Boolean, default=False)
-        require_mfa: Mapped[bool] = mapped_column(Boolean, default=False)
-        require_email_verification: Mapped[bool] = mapped_column(Boolean, default=False)
+        class LoginSettings(Base):  # noqa: F811
+            """One row of operator-set rules, for apps without a settings table of their own (see ``DbPolicy``)."""
+
+            __tablename__ = n["login_settings"]
+            id: Mapped[int] = mapped_column(primary_key=True, default=1)
+            local_login_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+            registration_open: Mapped[bool] = mapped_column(Boolean, default=False)
+            require_mfa: Mapped[bool] = mapped_column(Boolean, default=False)
+            require_email_verification: Mapped[bool] = mapped_column(Boolean, default=False)
 
     return Models(
         User=User, UserSession=UserSession, TotpFactor=TotpFactor, RecoveryCode=RecoveryCode, UserIdentity=UserIdentity,

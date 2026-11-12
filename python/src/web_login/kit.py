@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import httpx
 
 from web_login.config import LoginConfig
 from web_login.models import Models
-from web_login.ports import Cipher, Mailer, MemoryLimiter, NullMailer, Policy, RateLimiter, StaticPolicy
+from web_login.ports import Cipher, ErrorSet, Mailer, MemoryLimiter, NullMailer, Policy, RateLimiter, StaticPolicy
 
 
 class DbPolicy:
@@ -51,11 +52,16 @@ class DbPolicy:
 class LoginKit:
     models: Models
     cipher: Cipher
-    config: LoginConfig = field(default_factory=LoginConfig)
+    config: LoginConfig | Callable[[], LoginConfig] = field(default_factory=LoginConfig)  # a function is read on every use
     policy: Policy = field(default_factory=StaticPolicy)
     mailer: Mailer = field(default_factory=NullMailer)
     limiter: RateLimiter = field(default_factory=MemoryLimiter)
+    errors: ErrorSet = field(default_factory=ErrorSet)  # the app's own exception classes, if it has them
     http_transport: httpx.BaseTransport | None = None  # tests stand in for a provider here
+
+    @property
+    def settings(self) -> LoginConfig:
+        return self.config() if callable(self.config) else self.config
 
     def accounts(self):
         from web_login.service import Accounts

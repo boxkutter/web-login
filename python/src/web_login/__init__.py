@@ -16,6 +16,7 @@ from web_login.kit import DbPolicy, LoginKit
 from web_login.models import Models, build_models
 from web_login.ports import (
     Cipher,
+    ErrorSet,
     FernetCipher,
     Mailer,
     MemoryLimiter,
@@ -28,7 +29,7 @@ from web_login.ports import (
 
 __version__ = "0.1.0"
 __all__ = [
-    "AuthError", "Cipher", "Conflict", "DbPolicy", "FernetCipher", "Forbidden", "Invalid", "LoginConfig", "LoginKit", "Mailer",
+    "AuthError", "Cipher", "ErrorSet", "Conflict", "DbPolicy", "FernetCipher", "Forbidden", "Invalid", "LoginConfig", "LoginKit", "Mailer",
     "MemoryLimiter", "Models", "NotFound", "NullMailer", "Policy", "ProviderError", "RateLimited", "RateLimiter",
     "RedisLimiter", "StaticPolicy", "Unauthorized", "build_models",
 ]

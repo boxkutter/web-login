@@ -7,10 +7,12 @@ import base64
 import hashlib
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from cryptography.fernet import Fernet, InvalidToken
 
+from web_login import errors as _e
 from web_login.errors import RateLimited
 
 
@@ -64,9 +66,23 @@ class RateLimiter(Protocol):
     def clear(self, key: str) -> None: ...
 
 
-def enforce(limiter: RateLimiter, key: str, limit: int, window_seconds: int, message: str) -> None:
+@dataclass(frozen=True)
+class ErrorSet:
+    """The exception classes the library raises. An app whose own errors carry ``(detail, errors=None, extra=None)`` and
+    map to HTTP statuses can supply them, so its existing handlers and ``except`` clauses work on sign-in errors too."""
+
+    Unauthorized: type = _e.Unauthorized
+    Forbidden: type = _e.Forbidden
+    NotFound: type = _e.NotFound
+    Conflict: type = _e.Conflict
+    Invalid: type = _e.Invalid
+    RateLimited: type = _e.RateLimited
+    ProviderError: type = _e.ProviderError
+
+
+def enforce(limiter: RateLimiter, key: str, limit: int, window_seconds: int, message: str, error: type = RateLimited) -> None:
     if limiter.hit(key, window_seconds) > limit:
-        raise RateLimited(message)
+        raise error(message)
 
 
 class MemoryLimiter:

@@ -8,8 +8,8 @@ from datetime import timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from web_login import errors as _lib_errors
 from web_login import oidc
-from web_login.errors import Conflict, Forbidden, Invalid, NotFound, ProviderError, Unauthorized
 from web_login.ids import aware, utcnow
 from web_login.kit import LoginKit
 from web_login.service import SignIn
@@ -22,8 +22,19 @@ OPTION_KEYS = {"oidc": set(), "zitadel": {"org_id", "role_claim"}}
 
 class Providers:
     def __init__(self, kit: LoginKit):
-        self.kit, self.m, self.cfg = kit, kit.models, kit.config
+        self.kit, self.m = kit, kit.models
         self.accounts = kit.accounts()
+
+    @property
+    def cfg(self):
+        return self.kit.settings
+
+    def _oidc(self, fn, *args, **kwargs):
+        """Call the OpenID Connect client, raising the app's own provider error class (if it supplied one)."""
+        try:
+            return fn(*args, **kwargs)
+        except _lib_errors.ProviderError as exc:
+            raise self.kit.errors.ProviderError(exc.detail) from exc
 
     # --- looking providers up -------------------------------------------------------------------
 
@@ -31,13 +42,13 @@ class Providers:
         P = self.m.AuthProvider
         p = db.scalar(select(P).where(P.key == key, P.enabled))
         if p is None:
-            raise NotFound("No such sign-in method.")
+            raise self.kit.errors.NotFound("No such sign-in method.")
         return p
 
     def get(self, db: Session, provider_id: uuid.UUID):
         p = db.get(self.m.AuthProvider, provider_id)
         if p is None:
-            raise NotFound("No such connector.")
+            raise self.kit.errors.NotFound("No such connector.")
         return p
 
     def enabled(self, db: Session) -> list:
@@ -59,7 +70,7 @@ class Providers:
     # --- the sign-in flow ------------------------------------------------------------------------
 
     def _discover(self, issuer: str) -> dict:
-        return oidc.discover(issuer, allow_http=self.cfg.allow_http_issuer, transport=self.kit.http_transport)
+        return self._oidc(oidc.discover, issuer, allow_http=self.cfg.allow_http_issuer, transport=self.kit.http_transport)
 
     def start(self, db: Session, provider) -> str:
         doc = self._discover(provider.issuer)
@@ -76,13 +87,13 @@ class Providers:
         S = self.m.OidcLoginState
         row = db.scalar(select(S).where(S.state_hash == hash_token(state), S.provider_id == provider.id))
         if row is None or aware(row.expires_at) <= utcnow():
-            raise Unauthorized("The sign-in expired. Start again.")
+            raise self.kit.errors.Unauthorized("The sign-in expired. Start again.")
         db.delete(row)  # single use, whatever happens next
         db.flush()
         doc = self._discover(provider.issuer)
         secret = self.kit.cipher.decrypt(provider.client_secret_encrypted) if provider.client_secret_encrypted else None
-        tokens = oidc.exchange_code(provider, doc, code=code, redirect_uri=row.redirect_uri, verifier=row.code_verifier, client_secret=secret, transport=self.kit.http_transport)
-        claims = oidc.verify_id_token(provider, doc, tokens.get("id_token", ""), row.nonce, transport=self.kit.http_transport)
+        tokens = self._oidc(oidc.exchange_code, provider, doc, code=code, redirect_uri=row.redirect_uri, verifier=row.code_verifier, client_secret=secret, transport=self.kit.http_transport)
+        claims = self._oidc(oidc.verify_id_token, provider, doc, tokens.get("id_token", ""), row.nonce, transport=self.kit.http_transport)
         user = self.resolve_user(db, provider, claims)
         amr = ["oidc", *[a for a in claims.get("amr", []) if isinstance(a, str)]]
         issued = self.accounts.issue_session(db, user, state="full", amr=amr, ip=ip, user_agent=ua)
@@ -97,23 +108,23 @@ class Providers:
         if link:
             user = db.get(User, link.user_id)
             if user is None or user.disabled_at:
-                raise Forbidden("This account is disabled.")
+                raise self.kit.errors.Forbidden("This account is disabled.")
             return user
         email = str(claims.get("email", "")).strip().lower()
         if not email or claims.get("email_verified") is not True:
             # An unverified address proves nothing: linking on it would let anyone claim an account.
-            raise Forbidden("The provider did not confirm your email address.")
+            raise self.kit.errors.Forbidden("The provider did not confirm your email address.")
         user = db.scalar(select(User).where(User.email == email))
         if user is not None and not provider.link_by_email:
-            raise Forbidden("An account with that email exists but is not linked to this sign-in.")
+            raise self.kit.errors.Forbidden("An account with that email exists but is not linked to this sign-in.")
         if user is None:
             if not provider.auto_create_users:
-                raise Forbidden("You do not have access. Ask for an invitation.")
+                raise self.kit.errors.Forbidden("You do not have access. Ask for an invitation.")
             user = User(email=email, name=str(claims.get("name", ""))[:200], email_verified_at=utcnow())
             db.add(user)
             db.flush()
         if user.disabled_at:
-            raise Forbidden("This account is disabled.")
+            raise self.kit.errors.Forbidden("This account is disabled.")
         db.add(Identity(user_id=user.id, provider_id=provider.id, subject=subject, email_at_link=email))
         db.flush()
         return user
@@ -122,20 +133,20 @@ class Providers:
 
     def _check_options(self, kind: str, options: dict) -> None:
         if kind not in KINDS:
-            raise Invalid("Unknown connector type.")
+            raise self.kit.errors.Invalid("Unknown connector type.")
         extra = set(options) - OPTION_KEYS[kind]
         if extra:
-            raise Invalid(f"Unknown options: {', '.join(sorted(extra))}.")
+            raise self.kit.errors.Invalid(f"Unknown options: {', '.join(sorted(extra))}.")
 
     def create(self, db: Session, *, key: str, display_name: str, issuer: str, client_id: str, client_secret: str | None = None,
                kind: str = "oidc", scopes: str = "openid email profile", auto_create_users: bool = False,
                link_by_email: bool = False, options: dict | None = None):
         options = options or {}
         self._check_options(kind, options)
-        oidc.check_issuer_url(issuer, allow_http=self.cfg.allow_http_issuer)
+        self._oidc(oidc.check_issuer_url, issuer, allow_http=self.cfg.allow_http_issuer)
         P = self.m.AuthProvider
         if db.scalar(select(P.id).where(P.key == key)):
-            raise Conflict("That handle is taken.")
+            raise self.kit.errors.Conflict("That handle is taken.")
         p = P(
             key=key, kind=kind, display_name=display_name, issuer=issuer.rstrip("/"), client_id=client_id,
             client_secret_encrypted=self.kit.cipher.encrypt(client_secret) if client_secret else None, scopes=scopes,
@@ -154,7 +165,7 @@ class Providers:
         if secret:
             provider.client_secret_encrypted = self.kit.cipher.encrypt(secret)
         if "issuer" in data:
-            oidc.check_issuer_url(data["issuer"], allow_http=self.cfg.allow_http_issuer)
+            self._oidc(oidc.check_issuer_url, data["issuer"], allow_http=self.cfg.allow_http_issuer)
             data["issuer"] = data["issuer"].rstrip("/")
         for k in ("display_name", "issuer", "client_id", "scopes", "auto_create_users", "link_by_email", "options"):
             if k in data:
@@ -173,7 +184,7 @@ class Providers:
             ok, detail = True, f"Found {doc['issuer']}."
             if "S256" not in doc.get("code_challenge_methods_supported", ["S256"]):
                 ok, detail = False, "The provider does not support PKCE (S256)."
-        except ProviderError as exc:
+        except self.kit.errors.ProviderError as exc:
             ok, detail = False, exc.detail
         provider.last_test_ok, provider.last_test_at, provider.last_test_detail = ok, utcnow(), detail[:500]
         db.flush()
@@ -181,7 +192,7 @@ class Providers:
 
     def set_enabled(self, db: Session, provider, enabled: bool):
         if enabled and not provider.last_test_ok:
-            raise Conflict("Run the connection test successfully before switching it on.")
+            raise self.kit.errors.Conflict("Run the connection test successfully before switching it on.")
         if not enabled:
             self._ensure_sign_in_remains(db, excluding=provider)
         provider.enabled = enabled
@@ -191,7 +202,7 @@ class Providers:
     def delete(self, db: Session, provider) -> None:
         self._ensure_sign_in_remains(db, excluding=provider)
         if db.scalar(select(self.m.UserIdentity.id).where(self.m.UserIdentity.provider_id == provider.id).limit(1)):
-            raise Conflict("People are linked to this connector. Switch it off instead.")
+            raise self.kit.errors.Conflict("People are linked to this connector. Switch it off instead.")
         db.delete(provider)
         db.flush()
 
@@ -201,7 +212,7 @@ class Providers:
             return
         P = self.m.AuthProvider
         if db.scalar(select(P.id).where(P.enabled, P.id != excluding.id)) is None:
-            raise Conflict("Turn password sign-in back on first: nothing else would remain.")
+            raise self.kit.errors.Conflict("Turn password sign-in back on first: nothing else would remain.")
 
     def ensure_can_replace_local_login(self, db: Session, admin) -> None:
         """Switching off password sign-in is allowed only when an enabled, tested connector exists and the administrator
@@ -209,6 +220,6 @@ class Providers:
         P, Identity = self.m.AuthProvider, self.m.UserIdentity
         live = list(db.scalars(select(P).where(P.enabled, P.last_test_ok.is_(True))))
         if not live:
-            raise Conflict("Set up and test a sign-in connector first.")
+            raise self.kit.errors.Conflict("Set up and test a sign-in connector first.")
         if db.scalar(select(Identity.id).where(Identity.user_id == admin.id, Identity.provider_id.in_([p.id for p in live]))) is None:
-            raise Forbidden("Sign in once with the new connector (as yourself) before turning passwords off.")
+            raise self.kit.errors.Forbidden("Sign in once with the new connector (as yourself) before turning passwords off.")

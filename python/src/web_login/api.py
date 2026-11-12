@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from web_login.errors import AuthError, Forbidden, Unauthorized
+from web_login.errors import AuthError
 from web_login.ids import aware, utcnow
 from web_login.kit import DbPolicy, LoginKit
 
@@ -67,10 +67,9 @@ class AuthDeps:
         self.enrolling_auth = self._build(("full", "mfa_enrol", "verify_email"))
         self.pending_auth = self._build(("mfa_pending",))
 
-    @staticmethod
-    def bearer(authorization: str | None) -> str:
+    def bearer(self, authorization: str | None) -> str:
         if not authorization or not authorization.lower().startswith("bearer "):
-            raise Unauthorized("Sign in to continue.")
+            raise self.kit.errors.Unauthorized("Sign in to continue.")
         return authorization[7:].strip()
 
     def load_session(self, db: Session, token: str, states: tuple[str, ...]):
@@ -79,10 +78,10 @@ class AuthDeps:
         S = self.m.UserSession
         row = db.scalar(select(S).where(S.token_hash == hash_token(token)))
         if row is None or row.revoked_at is not None or aware(row.expires_at) <= utcnow() or row.state not in states:
-            raise Unauthorized("Sign in to continue.")
+            raise self.kit.errors.Unauthorized("Sign in to continue.")
         user = db.get(self.m.User, row.user_id)
         if user is None or user.disabled_at is not None:
-            raise Unauthorized("Sign in to continue.")
+            raise self.kit.errors.Unauthorized("Sign in to continue.")
         return row, user
 
     def _build(self, states: tuple[str, ...]):
@@ -109,7 +108,7 @@ class AuthDeps:
         """A dependency returning the signed-in instance administrator."""
         def dep(auth: Auth = Depends(self.current_auth)):
             if not auth.user.is_platform_admin:
-                raise Forbidden("Only an administrator can do that.")
+                raise self.kit.errors.Forbidden("Only an administrator can do that.")
             return auth.user
 
         return dep
@@ -201,11 +200,11 @@ def create_router(
             from web_login.ports import enforce
 
             ip = ip_of(request)
-            enforce(kit.limiter, f"register:{ip}", 10, 3600, "Too many sign-ups from here.")
+            enforce(kit.limiter, f"register:{ip}", 10, 3600, "Too many sign-ups from here.", kit.errors.RateLimited)
             if not kit.policy.local_login_enabled(db):
-                raise Forbidden("Password sign-up is turned off.")
+                raise kit.errors.Forbidden("Password sign-up is turned off.")
             if not accounts.registration_allowed(db):
-                raise Forbidden("Registration is closed. Ask for an invitation.")
+                raise kit.errors.Forbidden("Registration is closed. Ask for an invitation.")
             if can_register:
                 can_register(db, request, body)
             user = accounts.register(db, email=body.email, password=body.password, name=body.name)
@@ -267,7 +266,7 @@ def create_router(
         from web_login import passwords
 
         if not passwords.verify_password(a.user.password_hash, body.password) or not a.user.mfa_enabled:
-            raise Unauthorized("Email or password is not right.")
+            raise kit.errors.Unauthorized("Email or password is not right.")
         codes = accounts.regenerate_recovery_codes(db, a.user)
         db.commit()
         return {"recovery_codes": codes}
@@ -286,7 +285,7 @@ def create_router(
     def resend_verification(a: Auth = Depends(auth.enrolling_auth), db: Session = Depends(get_session)):
         from web_login.ports import enforce
 
-        enforce(kit.limiter, f"verify-resend:{a.user.id}", 5, 3600, "Too many requests. Try again later.")
+        enforce(kit.limiter, f"verify-resend:{a.user.id}", 5, 3600, "Too many requests. Try again later.", kit.errors.RateLimited)
         accounts.send_verification(db, a.user)
         db.commit()
 

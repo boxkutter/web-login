@@ -1,5 +1,6 @@
 import time
 
+import pytest
 from sqlalchemy import select
 
 from tests.conftest import PASSWORD, Stack
@@ -229,3 +230,44 @@ def test_security_events_are_recorded_with_truncated_networks(stack):
     kinds = [e.event_type for e in events]
     assert "account.registered" in kinds and "login.failed" in kinds and "login.ok" in kinds
     assert all(e.ip_network in (None, "testclient") or e.ip_network.endswith(("/24", "/48")) for e in events)
+
+
+def test_config_can_be_a_function_read_on_every_use_and_settings_table_is_optional():
+    current = {"cfg": LoginConfig(login_failures_per_hour=2, web_base_url="https://x.test")}
+    s = Stack(config=lambda: current["cfg"])
+    s.register()
+    for _ in range(2):
+        s.login(password="wrong wrong wrong wrong")
+    assert s.login().status_code == 429
+    current["cfg"] = LoginConfig(login_failures_per_hour=50, web_base_url="https://x.test")  # changed while running
+    assert s.login().status_code == 200
+
+    from sqlalchemy.orm import DeclarativeBase
+
+    from web_login import build_models
+
+    class B(DeclarativeBase):
+        pass
+
+    m = build_models(B, with_settings=False)
+    assert m.LoginSettings is None and "login_settings" not in B.metadata.tables
+
+
+def test_an_app_can_supply_its_own_error_classes():
+    from web_login import ErrorSet
+
+    class MyError(Exception):
+        status = 418
+
+        def __init__(self, detail, errors=None, extra=None):
+            super().__init__(detail)
+            self.detail = detail
+
+    class MyUnauthorized(MyError):
+        status = 401
+
+    s = Stack(errors=ErrorSet(Unauthorized=MyUnauthorized))
+    s.register()
+    with s.db() as db:
+        with pytest.raises(MyUnauthorized):
+            s.kit.accounts().sign_in(db, email="first@example.test", password="wrong wrong wrong", ip=None, user_agent=None)

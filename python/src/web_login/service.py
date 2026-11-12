@@ -15,7 +15,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from web_login import passwords, totp
-from web_login.errors import Conflict, Forbidden, Invalid, RateLimited, Unauthorized
+from web_login.errors import Invalid
 from web_login.ids import aware, utcnow
 from web_login.kit import LoginKit
 from web_login.ports import enforce
@@ -26,10 +26,10 @@ BAD_CODE = "That code is not right."
 EXPIRED_LINK = "This link has expired or was already used. Ask for a new one."
 
 
-def normalise_email(email: str) -> str:
+def normalise_email(email: str, error: type = Invalid) -> str:
     email = email.strip().lower()
     if "@" not in email or len(email) > 320 or " " in email:
-        raise Invalid("Enter a valid email address.")
+        raise error("Enter a valid email address.")
     return email
 
 
@@ -58,7 +58,14 @@ class SignIn:
 
 class Accounts:
     def __init__(self, kit: LoginKit):
-        self.kit, self.m, self.cfg = kit, kit.models, kit.config
+        self.kit, self.m = kit, kit.models
+
+    @property
+    def cfg(self):
+        return self.kit.settings
+
+    def normalise_email(self, email: str) -> str:
+        return normalise_email(email, self.kit.errors.Invalid)
 
     # --- events and sessions -----------------------------------------------------------------
 
@@ -105,12 +112,12 @@ class Accounts:
         return self.is_first_user(db) or self.kit.policy.registration_open(db)
 
     def register(self, db: Session, *, email: str, password: str, name: str = "", verified: bool = False):
-        email = normalise_email(email)
+        email = self.normalise_email(email)
         problem = passwords.policy_problem(password, email=email, min_length=self.cfg.password_min_length)
         if problem:
-            raise Invalid(problem)
+            raise self.kit.errors.Invalid(problem)
         if db.scalar(select(self.m.User.id).where(self.m.User.email == email)):
-            raise Conflict("An account with that email already exists.")
+            raise self.kit.errors.Conflict("An account with that email already exists.")
         first = self.is_first_user(db)
         user = self.m.User(
             email=email, name=name.strip()[:200], password_hash=passwords.hash_password(password), password_changed_at=utcnow(),
@@ -132,7 +139,7 @@ class Accounts:
     def _check_not_locked(self, email: str, ip: str | None) -> None:
         for key in self._fail_keys(email, ip):
             if self.kit.limiter.count(key) >= self.cfg.login_failures_per_hour:
-                raise RateLimited("Too many failed attempts. Try again later.")
+                raise self.kit.errors.RateLimited("Too many failed attempts. Try again later.")
 
     def _count_failure(self, email: str, ip: str | None) -> None:
         for key in self._fail_keys(email, ip):
@@ -143,7 +150,7 @@ class Accounts:
 
     def sign_in(self, db: Session, *, email: str, password: str, ip: str | None, user_agent: str | None) -> SignIn:
         if not self.kit.policy.local_login_enabled(db):
-            raise Forbidden("Password sign-in is turned off. Use your organisation's sign-in.")
+            raise self.kit.errors.Forbidden("Password sign-in is turned off. Use your organisation's sign-in.")
         email = email.strip().lower()
         self._check_not_locked(email, ip)
         user = db.scalar(select(self.m.User).where(self.m.User.email == email))
@@ -152,7 +159,7 @@ class Accounts:
             self._count_failure(email, ip)
             self.record_event(db, "login.failed", user_id=user.id if user else None, ip=ip)
             db.commit()
-            raise Unauthorized(BAD_CREDENTIALS)
+            raise self.kit.errors.Unauthorized(BAD_CREDENTIALS)
         if passwords.needs_rehash(user.password_hash):
             user.password_hash = passwords.hash_password(password)
         if user.mfa_enabled:
@@ -173,7 +180,7 @@ class Accounts:
         if self.kit.limiter.count(key) >= self.cfg.mfa_failures_per_challenge:
             self.revoke_session(db, pending)
             db.commit()
-            raise RateLimited("Too many wrong codes. Sign in again.")
+            raise self.kit.errors.RateLimited("Too many wrong codes. Sign in again.")
         method = None
         if code:
             if self.verify_totp(db, user, code):
@@ -184,7 +191,7 @@ class Accounts:
             self.kit.limiter.hit(key, 600)
             self.record_event(db, "mfa.failed", user_id=user.id, ip=ip)
             db.commit()
-            raise Unauthorized(BAD_CODE)
+            raise self.kit.errors.Unauthorized(BAD_CODE)
         self.revoke_session(db, pending)
         state = self.session_state_after_sign_in(db, user)  # still owes a verified email? stay limited
         issued = self.issue_session(db, user, state=state, amr=["pwd", method], ip=ip, user_agent=user_agent)
@@ -208,7 +215,7 @@ class Accounts:
     def begin_totp_setup(self, db: Session, user) -> tuple[str, str]:
         """A fresh, unconfirmed secret (replacing any unconfirmed one). Returns (secret, otpauth uri)."""
         if user.mfa_enabled:
-            raise Conflict("A second factor is already set up. Remove it first.")
+            raise self.kit.errors.Conflict("A second factor is already set up. Remove it first.")
         secret = totp.new_secret()
         T = self.m.TotpFactor
         factor = db.scalar(select(T).where(T.user_id == user.id))
@@ -225,10 +232,10 @@ class Accounts:
         T = self.m.TotpFactor
         factor = db.scalar(select(T).where(T.user_id == user.id))
         if factor is None or factor.confirmed_at is not None:
-            raise Conflict("Start the setup first.")
+            raise self.kit.errors.Conflict("Start the setup first.")
         step = totp.verify(self.kit.cipher.decrypt(factor.secret_encrypted), code)
         if step is None:
-            raise Invalid(BAD_CODE)
+            raise self.kit.errors.Invalid(BAD_CODE)
         factor.confirmed_at = utcnow()
         factor.last_used_step = step
         user.mfa_enabled = True
@@ -256,9 +263,9 @@ class Accounts:
 
     def disable_mfa(self, db: Session, user, *, password: str, ip: str | None) -> None:
         if not passwords.verify_password(user.password_hash, password):
-            raise Unauthorized(BAD_CREDENTIALS)
+            raise self.kit.errors.Unauthorized(BAD_CREDENTIALS)
         if self.kit.policy.require_mfa(db):
-            raise Forbidden("A second factor is required here.")
+            raise self.kit.errors.Forbidden("A second factor is required here.")
         db.execute(self.m.TotpFactor.__table__.delete().where(self.m.TotpFactor.user_id == user.id))
         db.execute(self.m.RecoveryCode.__table__.delete().where(self.m.RecoveryCode.user_id == user.id))
         user.mfa_enabled = False
@@ -267,10 +274,10 @@ class Accounts:
 
     def change_password(self, db: Session, user, *, current: str, new: str, keep_session: uuid.UUID, ip: str | None) -> None:
         if not passwords.verify_password(user.password_hash, current):
-            raise Unauthorized(BAD_CREDENTIALS)
+            raise self.kit.errors.Unauthorized(BAD_CREDENTIALS)
         problem = passwords.policy_problem(new, email=user.email, min_length=self.cfg.password_min_length)
         if problem:
-            raise Invalid(problem)
+            raise self.kit.errors.Invalid(problem)
         user.password_hash = passwords.hash_password(new)
         user.password_changed_at = utcnow()
         self.revoke_other_sessions(db, user.id, keep=keep_session)  # a changed password ends other logins
@@ -305,7 +312,7 @@ class Accounts:
     def verify_email(self, db: Session, token: str, ip: str | None):
         row = self._take_token(db, token, "verify")
         if row is None:
-            raise Invalid(EXPIRED_LINK)
+            raise self.kit.errors.Invalid(EXPIRED_LINK)
         user = db.get(self.m.User, row.user_id)
         assert user is not None
         user.email_verified_at = user.email_verified_at or utcnow()
@@ -321,7 +328,7 @@ class Accounts:
     def request_password_reset(self, db: Session, email: str, ip: str | None) -> None:
         """Always answers the same way; an email is sent only when it can be used. Limited per network."""
         email = email.strip().lower()
-        enforce(self.kit.limiter, f"reset:ip:{ip}", 10, 3600, "Too many requests. Try again later.")
+        enforce(self.kit.limiter, f"reset:ip:{ip}", 10, 3600, "Too many requests. Try again later.", self.kit.errors.RateLimited)
         user = db.scalar(select(self.m.User).where(self.m.User.email == email))
         if (
             user is None or user.disabled_at
@@ -336,13 +343,13 @@ class Accounts:
     def confirm_password_reset(self, db: Session, token: str, new_password: str, ip: str | None) -> None:
         row = self._take_token(db, token, "reset")
         if row is None:
-            raise Invalid(EXPIRED_LINK)
+            raise self.kit.errors.Invalid(EXPIRED_LINK)
         user = db.get(self.m.User, row.user_id)
         assert user is not None
         problem = passwords.policy_problem(new_password, email=user.email, min_length=self.cfg.password_min_length)
         if problem:
             row.used_at = None  # a weak password does not use up the link
-            raise Invalid(problem)
+            raise self.kit.errors.Invalid(problem)
         user.password_hash = passwords.hash_password(new_password)
         user.password_changed_at = utcnow()
         user.email_verified_at = user.email_verified_at or utcnow()  # they read our email
