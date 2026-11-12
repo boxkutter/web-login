@@ -180,6 +180,10 @@ def create_async_router(
         await _run(db, accounts.change_password, a.user, current=body.current_password, new=body.new_password, keep_session=a.session.id, ip=ip_of(request))
         await db.commit()
 
+    @router.get("/me/mfa")
+    async def mfa_status(a: Auth = Depends(auth.enrolling_auth)):
+        return {"enabled": bool(a.user.mfa_enabled)}
+
     @router.post("/me/mfa/totp/setup")
     async def mfa_setup(a: Auth = Depends(auth.enrolling_auth), db: AsyncSession = Depends(get_session)):
         secret, uri = await _run(db, accounts.begin_totp_setup, a.user)

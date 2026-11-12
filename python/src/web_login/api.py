@@ -247,6 +247,10 @@ def create_router(
         accounts.change_password(db, a.user, current=body.current_password, new=body.new_password, keep_session=a.session.id, ip=ip_of(request))
         db.commit()
 
+    @router.get("/me/mfa")
+    def mfa_status(a: Auth = Depends(auth.enrolling_auth)):
+        return {"enabled": bool(a.user.mfa_enabled)}
+
     @router.post("/me/mfa/totp/setup")
     def mfa_setup(a: Auth = Depends(auth.enrolling_auth), db: Session = Depends(get_session)):
         secret, uri = accounts.begin_totp_setup(db, a.user)

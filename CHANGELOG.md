@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.5.0
+- `GET /me/mfa`: whether an authenticator app is set up (both routers).
+
 ## 0.4.0
 - `include_me=False` on both routers, for apps with their own `GET /me`.
 

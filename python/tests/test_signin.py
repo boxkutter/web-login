@@ -283,3 +283,11 @@ def test_an_app_with_its_own_me_route_can_leave_the_librarys_out():
     assert "/v1/me" not in paths and "/v1/me/password" in paths and "/v1/auth/login" in paths
     assert "/v1/me" in {r.path for r in create_router(s.kit, s.get_session, s.auth).routes}
     assert APIRouter
+
+
+def test_the_second_factor_status_can_be_read(stack):
+    token = stack.register()
+    assert stack.client.get("/v1/me/mfa", headers=stack.h(token)).json() == {"enabled": False}
+    enrol(stack, token)
+    assert stack.client.get("/v1/me/mfa", headers=stack.h(token)).json() == {"enabled": True}
+    assert stack.client.get("/v1/me/mfa").status_code == 401
